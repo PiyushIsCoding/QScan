@@ -1,0 +1,60 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QScan — Quantum Readiness</title>
+<style>
+:root{--bg:#0b0f14;--pn:#121923;--ln:#243041;--tx:#d6e2f0;--mu:#7f93a8;--ac:#4fd1c5;--CRITICAL:#ff5d73;--HIGH:#ff9f45;--MEDIUM:#f5d547;--LOW:#5fd38d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+header{padding:18px 28px;border-bottom:1px solid var(--ln);display:flex;gap:16px;align-items:baseline}
+h1{margin:0;font:600 20px "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.5px}h1 span{color:var(--ac)}.mu{color:var(--mu)}
+main{padding:24px 28px;max-width:1200px;margin:auto}.card{background:var(--pn);border:1px solid var(--ln);border-radius:6px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{display:flex;flex-direction:column;font-size:12px;color:var(--mu);gap:3px}
+select,input{background:#0b0f14;color:var(--tx);border:1px solid var(--ln);border-radius:4px;padding:6px 8px;font:inherit}
+button{background:var(--ac);color:#04201d;border:0;border-radius:4px;padding:8px 16px;font-weight:600;cursor:pointer}button.g{background:none;color:var(--ac);border:1px solid var(--ac)}
+nav{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--ln)}nav a{padding:8px 14px;cursor:pointer;color:var(--mu);border-bottom:2px solid transparent}nav a.on{color:var(--ac);border-color:var(--ac)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.k b{display:block;font:600 34px "IBM Plex Mono",monospace}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--ln);vertical-align:top}th{color:var(--mu);font-weight:500;font-size:12px}
+.tag{padding:1px 8px;border-radius:10px;font:600 11px "IBM Plex Mono",monospace;color:#0b0f14}.bar{height:8px;border-radius:4px;background:var(--ln);overflow:hidden}.bar i{display:block;height:100%}
+code{font:12px "IBM Plex Mono",monospace;color:var(--ac)}.hide{display:none}tr.cl{cursor:pointer}tr.cl:hover{background:#17212e}
+</style></head><body>
+<header><h1>Q<span>SCAN</span></h1><span class="mu">cryptographic discovery · CBOM · quantum risk · PQC migration</span></header>
+<main>
+<div class="card"><div class="row">
+<label>Repository ZIP<input type="file" id="f" accept=".zip"></label>
+<label>Sensitivity<select id="sens"><option>low<option>medium<option selected>high<option>critical</select></label>
+<label>Criticality<select id="crit"><option>low<option>medium<option>high<option selected>critical</select></label>
+<label>Exposure<select id="exp"><option value="internal">internal<option value="internet" selected>internet-facing</select></label>
+<label>Data lifetime (yrs)<input id="life" type="number" value="12" style="width:90px"></label>
+<label>Migration time (yrs)<input id="mig" type="number" value="3" style="width:90px"></label>
+<label>Threat horizon<select id="hz"><option value="conservative">conservative 10y<option value="moderate" selected>moderate 15y<option value="aggressive">aggressive 20y</select></label>
+<button onclick="go()">Scan</button></div>
+<p class="mu" style="margin:10px 0 0">Context is user-supplied (code cannot reveal data sensitivity or lifetime). Per-service overrides: optional JSON <input id="ov" placeholder='{"payment-service":{"sensitivity":"critical"}}' style="width:420px"></p></div>
+<div id="out" class="hide">
+<nav id="nav"></nav>
+<section id="t0"></section><section id="t1" class="hide"></section><section id="t2" class="hide"></section><section id="t3" class="hide"></section>
+</div></main>
+<script>
+let R=null;const C=s=>`var(--${s})`,tag=s=>`<span class="tag" style="background:${C(s)}">${s}</span>`;
+const tabs=["Overview","Crypto Inventory","Risk & Mosca","Migration Planner"];
+document.getElementById("nav").innerHTML=tabs.map((t,i)=>`<a id="n${i}" onclick="show(${i})">${t}</a>`).join("");
+function show(i){tabs.forEach((_,j)=>{document.getElementById("t"+j).classList.toggle("hide",i!=j);document.getElementById("n"+j).classList.toggle("on",i==j)})}
+async function go(){const f=document.getElementById("f").files[0];if(!f)return alert("Choose a ZIP");
+ const v=id=>document.getElementById(id).value;let ov={};try{ov=JSON.parse(v("ov")||"{}")}catch(e){return alert("Override JSON invalid")}
+ const ctx={default:{sensitivity:v("sens"),criticality:v("crit"),exposure:v("exp"),data_lifetime_years:+v("life"),migration_years:+v("mig")},...ov};
+ const fd=new FormData();fd.append("file",f);fd.append("context",JSON.stringify(ctx));fd.append("horizon",v("hz"));
+ const r=await fetch("/api/scan",{method:"POST",body:fd});if(!r.ok)return alert((await r.json()).detail);R=await r.json();render();}
+function render(){document.getElementById("out").classList.remove("hide");const s=R.summary,b=s.by_severity;
+ t0.innerHTML=`<div class="kpis"><div class="card k"><span class="mu">Quantum readiness</span><b style="color:${s.readiness<50?C("CRITICAL"):C("LOW")}">${s.readiness}</b><span class="mu">/100</span></div>
+ <div class="card k"><span class="mu">Crypto assets</span><b>${s.scored}</b><span class="mu">scored · ${s.total-s.scored} libraries/keys</span></div><div class="card k"><span class="mu">Quantum-vulnerable</span><b>${s.quantum_vulnerable}</b><span class="mu">${s.prod_quantum_vulnerable} in production code</span></div>
+ <div class="card k"><span class="mu">Critical / High</span><b>${b.CRITICAL||0} / ${b.HIGH||0}</b></div></div>
+ <div class="card"><b>Severity distribution</b>${["CRITICAL","HIGH","MEDIUM","LOW"].map(k=>`<div style="margin:8px 0">${k} ${b[k]||0}<div class="bar"><i style="width:${(b[k]||0)/Math.max(1,Object.values(b).reduce((a,c)=>a+c,0))*100}%;background:${C(k)}"></i></div></div>`).join("")}
+ <a href="/api/cbom/${R.id}"><button class="g">Download CycloneDX CBOM (JSON)</button></a></div>`;
+ inv();risk();planUI();show(0)}
+function inv(){t1.innerHTML=`<div class="card"><table><tr><th>ID<th>Type<th>Algorithm<th>Purpose<th>Location<th>Service<th>Conf.<th>Risk</tr>${R.findings.map(f=>`<tr class="cl" onclick="this.nextElementSibling.classList.toggle('hide')"><td>${f.id}<td>${f.asset_type}<td><code>${f.algorithm}</code><td>${f.purpose}<td>${f.file}:${f.line}<td>${f.service}${f.scope=="test"?" <span class=mu>[test]</span>":""}<td>${(f.confidence*100)|0}%<td>${f.risk?tag(f.risk.severity):"—"}</tr>
+ <tr class="hide"><td colspan="8" class="mu">Evidence: ${f.evidence.join(" · ")}${f.not_after?`<br>Validity: ${f.not_before.slice(0,10)} → ${f.not_after.slice(0,10)} (${f.lifetime_years}y)`:""}${f.recommendation?`<br>→ <b style="color:var(--tx)">${f.recommendation.target}</b> (${f.recommendation.standard}) — ${f.recommendation.strategy}<br>${f.recommendation.size_note}`:""}</td></tr>`).join("")}</table></div>`}
+function risk(){const rs=R.findings.filter(f=>f.risk).sort((a,b)=>b.risk.score-a.risk.score);
+ t2.innerHTML=`<div class="card mu">Mosca: exposed when <b>data lifetime (x) + migration time (y) &gt; quantum threat horizon (z = ${R.summary.horizon_years}y)</b>. For signatures, x = how long the signed artefact must stay trustworthy.</div>`+rs.map(f=>{const r=f.risk,m=r.mosca;return `<div class="card"><div class="row" style="justify-content:space-between"><b><code>${f.algorithm}</code> — ${f.file}:${f.line}</b>${tag(r.severity)}</div>
+ <div class="mu">${r.quantum_note} · score ${r.score}/100 · ${r.context.exposure}, ${r.context.sensitivity} sensitivity, ${r.context.criticality} criticality</div>
+ <div style="margin:8px 0">Mosca: ${m.x} + ${m.y} = ${m.x+m.y}y vs ${m.z}y → <b style="color:${m.exposed?C("CRITICAL"):C("LOW")}">${m.exposed?"EXPOSED by "+(-m.margin_years)+"y":"safe, margin "+m.margin_years+"y"}</b></div>
+ ${Object.entries(r.components).map(([k,v])=>`<div class="row" style="gap:8px"><span class="mu" style="width:110px">${k}</span><div class="bar" style="flex:1"><i style="width:${v}%;background:var(--ac)"></i></div></div>`).join("")}</div>`}).join("")}
+function planUI(){t3.innerHTML=`<div class="card mu">Service topology (docker-compose / manual deps): ${Object.keys(R.topology||{}).length?Object.entries(R.topology).map(([s,d])=>s+(d.length?" → "+d.join(", "):"")).join(" · "):"none found"}. Within each severity phase, services that others depend on migrate first.</div><div class="card"><table><tr><th>#<th>Phase<th>Asset<th>Service<th>Severity<th>Score<th>Unblocks<th>Migrate to<th>Strategy<th>Status</tr>${R.plan.map(p=>`<tr><td>${p.order}<td>P${p.phase}<td><code>${p.asset}</code><br><span class="mu">${p.file}</span><td>${p.service}<td>${tag(p.severity)}<td>${p.score}<td>${p.blocks||0}<td>${p.target||"—"}<td>${p.strategy||""}
+ <td><select onchange="p=R.plan[${p.order-1}];p.status=this.value"><option>todo<option>in-progress<option>done</select></tr>`).join("")}</table></div>`}
+</script></body></html>

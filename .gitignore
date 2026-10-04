@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+
+# Scan outputs and test inputs
+cbom-*.json
+paramiko-main.zip
+demo_repo (1).zip
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
