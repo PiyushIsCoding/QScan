@@ -39,10 +39,10 @@ Discover  →  Normalize  →  CBOM  →  Quantum risk (Mosca)  →  PQC recomme
 ```
 qscan/
 ├── core.py            # scanner, normalization, risk engine, recommender, planner, CBOM export
-├── requirements.txt   # Python dependencies
+├── Requirements       # Python dependencies
 ├── app.py             # FastAPI backend (serves the built React app if present)
 ├── index.html         # legacy single-file dashboard (fallback)
-├── demo_repo.zip      # demo project with planted crypto usage
+├── demo_repo (1).zip  # demo project with planted crypto usage
 └── frontend/          # React + Vite dashboard
     ├── index.html
     ├── package.json
@@ -67,7 +67,7 @@ python -m venv .venv
 # activate: Windows PowerShell  .venv\Scripts\Activate.ps1
 #           Windows cmd         .venv\Scripts\activate
 #           Mac/Linux           source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r Requirements
 uvicorn app:app --reload          # http://localhost:8000
 ```
 
@@ -115,7 +115,20 @@ If `frontend/dist` does not exist, `app.py` serves the legacy `index.html` dashb
    A service is the top-level folder of the project. `deps` means "the key depends on the listed services".
 4. Click **Scan**, then explore the tabs and download the CBOM.
 
-Try it first with `demo_repo.zip`: it contains an RSA JWT signer, ECDSA/MD5/AES-128 usage, an X.509 certificate, an RSA private key, nginx and sshd config, a KMS client, and a `docker-compose.yml` that produces a dependency graph.
+Try it first with `demo_repo (1).zip`: it contains an RSA JWT signer, ECDSA/MD5/AES-128 usage, an X.509 certificate, an RSA private key, nginx and sshd config, a KMS client, and a `docker-compose.yml` that produces a dependency graph. The demo archive contains a throwaway generated RSA private key for detector testing; it is not a production credential.
+
+### Validate a CBOM
+
+Validate a generated CBOM against the official CycloneDX 1.6 JSON schema:
+
+```bash
+python scripts/validate_cbom.py "demo_repo (1).zip"
+python scripts/validate_cbom.py paramiko-main.zip
+```
+
+The validator fetches the schema from CycloneDX by default. Use `--schema path/to/bom-1.6.schema.json` for an offline check.
+
+See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the three-minute presentation flow and fallback commands.
 
 ---
 
@@ -168,14 +181,14 @@ Scan results are held in memory and are lost when the server restarts.
 
 ## Limitations (please read)
 
-- Detection is **pattern-based with light constant tracking**, not full AST or data-flow analysis. Java and Go are regex-only. Expect some false positives (for example, algorithm names in docstrings) and misses.
+- Detection is **pattern-based with light constant tracking**, not full AST or data-flow analysis. Java and Go are regex-only. Comments and Python docstrings are masked, but expect false positives from algorithm references, strings and capability lists, as well as misses.
 - Data sensitivity, criticality and lifetime are **user-supplied**; they cannot be inferred from code.
 - Risk weights are a starting policy, not a validated standard.
 - Library-to-algorithm links in the CBOM are **co-location heuristics** (same service folder), not proof of usage.
 - Migration ordering is a transparent heuristic (severity phase, then number of dependent services, then score), not an optimization.
 - The what-if slider is an estimate; effort and cost are not modelled.
 - Container-image scanning, binary scanning, live TLS endpoint probing, CI/CD mode and LLM explanations are **not implemented** (roadmap).
-- The generated CBOM should be validated against the official CycloneDX 1.6 schema before being relied on.
+- Generated CBOMs can be checked with `python scripts/validate_cbom.py`; schema validity does not prove detector or risk-score accuracy.
 - Verify PQC algorithm and standard status (including FN-DSA / FIPS 206 and HQC) against current NIST publications.
 
 ---

@@ -100,21 +100,71 @@ def _norm(family, size):
     return f"{family}-{size}" if size else family
 
 
+def _mask_comments(text, lang):
+    """Mask comments while preserving source length and line numbers."""
+    masked = list(text)
+    block_end = None
+    quote = None
+    escaped = False
+    i = 0
+    while i < len(text):
+        if block_end:
+            if text.startswith(block_end, i):
+                for j in range(i, min(i + len(block_end), len(masked))):
+                    if masked[j] != "\n": masked[j] = " "
+                i += len(block_end)
+                block_end = None
+            else:
+                if masked[i] != "\n": masked[i] = " "
+                i += 1
+            continue
+        if quote:
+            if escaped:
+                escaped = False
+            elif text[i] == "\\":
+                escaped = True
+            elif text[i] == quote:
+                quote = None
+            i += 1
+            continue
+        if lang == "python" and (text.startswith('"""', i) or text.startswith("'''", i)):
+            block_end = text[i:i + 3]
+            for j in range(i, min(i + 3, len(masked))):
+                if masked[j] != "\n": masked[j] = " "
+            i += 3
+            continue
+        if lang != "python" and text.startswith("/*", i):
+            block_end = "*/"
+            masked[i] = masked[i + 1] = " "
+            i += 2
+            continue
+        if (lang == "python" and text[i] == "#") or (lang != "python" and text.startswith("//", i)):
+            line_end = text.find("\n", i)
+            line_end = len(text) if line_end == -1 else line_end
+            for j in range(i, line_end): masked[j] = " "
+            i = line_end
+            continue
+        if text[i] in "'\"`": quote = text[i]
+        i += 1
+    return "".join(masked)
+
+
 def _scan_code(path, text, lang):
     out, consts = [], {}
-    for m in re.finditer(r"^\s*(?:const |let |var )?([A-Za-z_]\w*)\s*[:=]\s*(\d{3,5})\s*;?\s*$", text, re.M):
+    scanned = _mask_comments(text, lang)
+    for m in re.finditer(r"^\s*(?:const |let |var )?([A-Za-z_]\w*)\s*[:=]\s*(\d{3,5})\s*;?\s*$", scanned, re.M):
         consts[m.group(1)] = int(m.group(2))
-    for i, line in enumerate(text.splitlines(), 1):
+    for i, (source_line, line) in enumerate(zip(text.splitlines(), scanned.splitlines()), 1):
         s = line.strip()
-        if not s or s.startswith(("#", "//", "*", "/*")): continue
+        if not s: continue
         for rx, fam, dflt in RULES:
             if re.search(rx, line):
                 size = _key_size(fam, line, consts)
-                resolved = size is not None and not re.search(r"\b%s\b" % size, line)
+                resolved = fam in ("RSA", "DSA", "DH") and size is not None and not re.search(r"\b%s\b" % size, line)
                 conf = 0.55 + (0.2 if size else 0) + (0.1 if re.search(r"\(|\.", s) else 0)
                 out.append(dict(asset_type="algorithm", family=fam, algorithm=_norm(fam, size), key_size=size,
                                 purpose=_purpose(line, dflt), file=path, line=i, language=lang,
-                                evidence=[s[:140]] + (["key size resolved from constant"] if resolved else []),
+                                evidence=[source_line.strip()[:140]] + (["key size resolved from constant"] if resolved else []),
                                 confidence=round(min(conf, 0.95), 2)))
     return out
 
@@ -322,7 +372,7 @@ def plan(findings):
 
 
 def to_cbom(findings, app_name="scanned-app"):
-    comps, deps, app_ref, libs = [], [], "app-root", []
+    comps, services, deps, app_ref, libs = [], [], [], "app-root", []
     FUNCS = {"signature": ["sign", "verify"], "encryption": ["encrypt", "decrypt"], "key-exchange": ["keyderive"], "hash": ["digest"]}
     QLEVEL = {"AES-128": 1, "AES-192": 3, "AES-256": 5}
     PRIM = {"signature": "signature", "key-exchange": "key-agree", "encryption": "block-cipher", "hash": "hash"}
@@ -332,9 +382,11 @@ def to_cbom(findings, app_name="scanned-app"):
             comps.append({"type": "library", "bom-ref": ref, "name": f["algorithm"], "description": f["purpose"],
                           "evidence": {"occurrences": [{"location": f["file"], "line": f["line"]}]}}); deps.append(ref); libs.append(f); continue
         if f["asset_type"] in ("cloud-service", "hardware-module"):
-            comps.append({"type": "service" if f["asset_type"] == "cloud-service" else "device", "bom-ref": ref, "name": f["algorithm"], "description": f["purpose"],
-                          "properties": [{"name": "qscan:service", "value": f["service"]}, {"name": "qscan:risk", "value": f["risk"]["severity"] if f.get("risk") else ""}],
-                          "evidence": {"occurrences": [{"location": f["file"], "line": l} for l in f.get("lines", [f["line"]])]}}); deps.append(ref); continue
+            asset = {"bom-ref": ref, "name": f["algorithm"], "description": f["purpose"],
+                     "properties": [{"name": "qscan:service", "value": f["service"]}, {"name": "qscan:risk", "value": f["risk"]["severity"] if f.get("risk") else ""}]}
+            if f["asset_type"] == "cloud-service": services.append(asset)
+            else: comps.append({"type": "device", **asset})
+            deps.append(ref); continue
         cp = {"assetType": "certificate" if f["asset_type"] == "certificate" else "related-crypto-material" if f["asset_type"] in ("private-key", "keystore") else "protocol" if f["asset_type"] == "protocol" else "algorithm"}
         if cp["assetType"] == "algorithm":
             cp["algorithmProperties"] = {"primitive": PRIM.get(f["purpose"], "other"), "parameterSetIdentifier": f["key_size"] or "unknown",
@@ -347,14 +399,16 @@ def to_cbom(findings, app_name="scanned-app"):
                                            "notValidBefore": f.get("not_before"), "notValidAfter": f.get("not_after")}
         if f["asset_type"] == "protocol": cp["protocolProperties"] = {"type": f["family"].lower()}
         props = [{"name": "qscan:service", "value": f["service"]}, {"name": "qscan:confidence", "value": str(f["confidence"])}]
-        if f.get("risk"): props += [{"name": "qscan:risk", "value": f["risk"]["severity"]}, {"name": "qscan:score", "value": str(f["risk"]["score"])},
-                                    {"name": "qscan:recommended-replacement", "value": (f["recommendation"] or {}).get("target", "")}]
+        if f.get("risk"):
+            props += [{"name": "qscan:risk", "value": f["risk"]["severity"]}, {"name": "qscan:score", "value": str(f["risk"]["score"])}]
+            replacement = (f["recommendation"] or {}).get("target")
+            if replacement: props.append({"name": "qscan:recommended-replacement", "value": replacement})
         comps.append({"type": "cryptographic-asset", "bom-ref": ref, "name": f["algorithm"], "cryptoProperties": cp,
                       "evidence": {"occurrences": [{"location": f["file"], "line": l} for l in f.get("lines", [f["line"]])]}, "properties": props}); deps.append(ref)
     return {"bomFormat": "CycloneDX", "specVersion": "1.6", "serialNumber": f"urn:uuid:{uuid.uuid4()}", "version": 1,
             "metadata": {"timestamp": datetime.datetime.utcnow().isoformat() + "Z", "component": {"type": "application", "name": app_name, "bom-ref": app_ref},
                          "tools": {"components": [{"type": "application", "name": "QScan"}]}},
-            "components": comps, "dependencies": [{"ref": app_ref, "dependsOn": deps}] + [
+            "components": comps, "services": services, "dependencies": [{"ref": app_ref, "dependsOn": deps}] + [
                 {"ref": f"crypto/{l['id']}", "dependsOn": [f"crypto/{a['id']}" for a in findings if a["asset_type"] in SCORED and a["service"] == l["service"]]}
                 for l in libs]}
 

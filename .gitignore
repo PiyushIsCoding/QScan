@@ -8,6 +8,7 @@ venv/
 # Node / React
 frontend/node_modules/
 frontend/dist/
+frontend/api-scan-result.json
 
 # Scan outputs and test inputs
 cbom-*.json

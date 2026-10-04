@@ -2,3 +2,4 @@ fastapi
 uvicorn
 python-multipart
 cryptography
+jsonschema>=4.23,<5
